@@ -1,0 +1,228 @@
+---
+title: "Anàlisi de dades òmiques"
+author: "Marc Sebasitán Romagosa"
+date: "6/6/2020"
+output: 
+  html_document:
+    toc: yes
+    toc_float: yes
+    toc_depth: 5
+    theme: united
+    highlight: tango
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(pracma)
+library(dplyr)
+library(hexbin)
+library(S4Vectors)
+library(DESeq2)
+library(pracma)
+library(dplyr)
+
+```
+
+Repositori Github: https://github.com/neuronm/AnalisiDadesOmiques_PEC2
+
+
+
+## Abstract
+
+Aquest anàlisi es un estudi de RNA-seq de 30 mostres, les quals estan classificades en 3 grups diferents en base a un tractament subministrat. L'objectiu principal és trobar els gens diferencialment expressats en cada grup. Les mostres han sigut pre-processades mitjançant un procés de filtratge i normalització, i després han sigut analitzades amb el paquet `DESeq2` d'R. Els resultats obtinguts mostren que el contrast entre el grup NIT-ELI és el que es reporta més diferencies significatives entre els gens, seguit per el contrast ELI-SFI. Les diferències significatives entre les mostres dels grups SFI-NIT són menors.
+
+## 1. Objectius
+
+L'objectiu de l'estudi és realitzar una anàlisi d'expressió diferencial de 30 mostres de teixit tiroidal. Es compararan les mostres de tres grups diferents per tal de trobar les diferències significatives.
+
+## 2. Materials i mètodes
+
+### 2.1 Presentació de les dades i del tipus d’estudi
+
+Les dades que s’utilitzen en aquest informe provenen de 292 mostres de teixit tiroidal. Aquestes mostres són part d’una investigació prèvia que es troba al dipòsit digital GTEx. 
+El dataset estudiat agrupa les 291 mostres en tres classes diferents depenent del tipus d’infiltració utilitzat en cada cas; Not infiltrated tissues (NIT), Small Focal inflitrates (SFI), Extensive lymphoid infiltrates (ELI).  Per aquesta anàlisi s’han seleccionat aleatòriament 10 mostres de cada grup mitjançant la funció `random.selection`, la qual es descriurà a continuació.
+Amb aquestes dades es farà un estudi de seqüenciació genètica mitjançant una anàlisi d’expressió diferencial (RNA-seq), on es compararan les mostres dels tres grups; SFI-NIT, ELI-NIT, ELI-SFI.
+
+### 2.2 Procediment general de l’anàlisi
+
+En primer lloc s’ha fet la selecció de 10 mostres de cada grup de manera aleatòria. En segon lloc s’ha realitzat el pre-processament de les dades mitjançant un filtratge i normalització de les mateixes. En tercer lloc s’ha fet la identificació els gens diferencialment expressats i en quart lloc l’anotació dels resultats. El cinquè pas ha sigut cercar patrons d’expressió i agrupar les mostres. Finalment s’ha dut a terme l’anàlisi de significació biològica. 
+Per a aquest anàlisi es farà servir el paquet DESeq2 de Rstudio.
+
+### 2.3 Descripció específica del procediment
+
+Per a la selecció de les mostres s’ha utilitzat la funció `random.selection`. Aquesta funció requereix dos arguments d’entrada; la variable `x` és un vector amb el nom de cada grup, la longitud d’aquest ha de ser igual al nombre de mostres que té el dataset original. El segon argument d’entrada, `num`, és el número de mostres que es desitja tenir per cada grup. Les variables obtingudes, `targets2` i `counts2` són el fruit de la selecció de 10 casos per cada grup, d'aquesta manera la variable `counts2` té 30 columnes i la variable `targets2` té 30 files.
+A continuació es crea l’objecte DESeqDataSet a partir de la variable `counts2` fent servir la funció `DESeqDataSetFromMatrix`, el resultat d’aquesta funció és la variable `ddsMat`. Amb aquesta variable es comença a fer l’anàlisi fent el filtratge de les dades i les transformacions corresponents.  Primer eliminem les files on hi ha només zeros o on no hi ha pràcticament cap dada. Aquest pas agilitzarà el processament de les dades. Un altre pas dins del filtratge de dades previ és l’estabilització de la variància mitjançant la funció `vst` per tal de que es pugui assumir l’homoscedasticitat del dataset.
+
+Un cop s'hagi pogut fer la transformació de les dades es realitza l'anàlisi de diferenciació dels gens. En aquest estudi tenim les mostres distribuïdes en tres grups. Hi ha certa discussió al respecte sobre quin és el millor mètode per fer la comparació múltiple. Algunes fonts argumenten que el millor mètode és realitzar la comparació mitjançant el Likelihood ratio test [1], [2], mentre que altres diuen que és millor fer l’anàlisi de tots els grups de manera conjunta i després fer el contrast de cada grup per separat mitjançant l’argument `contrast` de la funció `results()` [3]. En aquest informe s'ha triat la segona opció, on tots els grups s'analitzaran de manera conjunta i després es farà cada contrast per separat (NIT-ELI, NIT-SFI, ELI-SFI). Finalment es fa l'anotació dels gens i s'exportaran els resultats.
+
+
+## 3. Resultats
+
+*Obtenció de les dades*
+
+```{r}
+a <- tempfile()
+download.file("https://github.com/neuronm/AnalisiDadesOmiques_PEC2/raw/master/targetsycounts.zip",a)
+counts <- read.table(unz(a,"counts.csv"),sep = ";",header = TRUE, row.names = 1)
+targets <- read.table(unz(a,"targets.csv"),sep = ",",header = TRUE)
+```
+
+### 3.1 Selecció de la mostra
+
+A continuació es mostra la funció `random.selection` que s'ha descrit en el punt 2.3 d'aquest informe. A continuació es creen les variables `targets2` i `counts2` formades per les 30 mostres seleccionades. Després s'elimina la versió d'ENSAMBL de cada transcrit i es modifica el nom de cada mostra per tal que tinguin el mateix format en les variables `targets2` i `counts2`.
+
+```{r}
+random.selection <- function(x,num){
+  groups <- as.numeric(unique(x))
+  table <- matrix(data=NA,ncol=num+1,nrow=length(groups))
+  set.seed(123)
+  for (i in 1:length(groups)){
+    table[i] <- groups[i]
+    table [i,2:11] <- sample( which(x==groups[i]),num)
+  }
+  return(table)
+}
+a <- random.selection(targets$Grupo_analisis,10)
+targets2 <- targets[as.vector(a[,2:11]),]
+targets2$Group<-factor(targets2$Group)
+counts2 <- counts[,as.vector(a[,2:11])]
+
+# Remove ENSAMBL version
+for (i in 1:nrow(counts2)){
+  rownames(counts2)[i] <- substr(rownames(counts2)[i], 1,findstr('.',rownames(counts2)[i])-1)
+}
+
+for (i in 1:30){
+  if (as.character(targets2$Sample_Name[i]) == gsub('\\.','-',colnames(counts2[i]))){
+    targets2$Sample_Name[i]<-gsub('-','\\.',targets2$Sample_Name[i])
+  }
+}
+```
+
+
+### 3.2 Preprocessat de les dades, filtratje i normalizació
+
+Per poder fer el filtratge de les dades es crea l'objecte `DESeqDataSetFromMatrix` anomenat `ddsMat`.
+
+```{r}
+# Creació de l'objecte DESeqDataSet
+ddsMat <- DESeqDataSetFromMatrix(countData = as.matrix(counts2),colData= DataFrame(targets2),design = ~Group, tidy = FALSE)
+
+# Eliminació de les files buides o amb poques dades
+nrow(ddsMat)
+dds <- ddsMat[ rowSums(counts(ddsMat)) > 1, ]
+nrow(dds)
+```
+
+Podem veure que el la variable `ddsMat`sense filtrar conté `nrow(ddsMat)` files, i un cop eliminem les files on tots els valors son 0, ens queda la variable `dds`amb `nrow(dds)` files.
+A continuació fem l'estabilització de la variància i la transformació amb la funció `vst`, la qual és la més adient per datasets de fins a 30 mostres.
+
+```{r}
+##Estabilització de la variància i transformació
+vsd <- vst(dds, blind = FALSE)
+head(assay(vsd), 3)
+```
+
+A continuació veiem dos gràfics on les dades han sigut transformades de manera diferent. Al gràfic de la dreta apareixen els contatges transformats mitjançant log2, i a la dreta els contatges transformats a través de la funció prèviament mencionada, `vst`.
+
+```{r}
+library("ggplot2")
+dds <- estimateSizeFactors(dds)
+df <- bind_rows(as_data_frame(log2(counts(dds, normalized=TRUE)[, 1:2]+1)) %>% mutate(transformation = "log2(x + 1)"),as_data_frame(assay(vsd)[, 1:2]) %>% mutate(transformation = "vst"))
+colnames(df)[1:2] <- c("x", "y")  
+ggplot(df, aes(x = x, y = y)) + geom_hex(bins = 80) + coord_fixed() + facet_grid( . ~ transformation) 
+```
+
+Podem veure clarament que el mètode log2 presenta uns counts amb més variabilitat  que amb el mètode VST, el qual redueixen les diferencies dels gens amb counts baixos que proporcionen poca informació sobre l'expressió diferencial.
+
+En aquests tipus d'anàlisi un pas habitual és fer la presentació de la relació entre grups mitjançant un heatmap. A continuació es presenta el gràfic tot i que en aquest pot ser una mica complicat extreure informació important degut a les característiques del dataset i el nombre de mostres.
+
+```{r, include = FALSE}
+#Sample distances
+sampleDists <- dist(t(assay(vsd)))
+sampleDists
+
+
+library("pheatmap")
+library("RColorBrewer")
+
+sampleDistMatrix <- as.matrix( sampleDists )
+rownames(sampleDistMatrix) <- vsd$ShortName
+colnames(sampleDistMatrix) <- NULL
+colors <- colorRampPalette( rev(brewer.pal(9, "Blues")) )(255)
+pheatmap(sampleDistMatrix, clustering_distance_rows = sampleDists,clustering_distance_cols = sampleDists,col = colors)
+```
+
+A continuació es presenta un plot dels components principals on es pot veure la distribució de les mostres en funció de la seva variància. Es pot notar que les mostres del grup NIT estan clarament diferenciades respecte les del grup ELI.
+
+```{r}
+plotPCA(vsd, intgroup = c("Group"))
+```
+
+### 3.3 Anotació dels gens diferencialment expressats
+A continuació es realitza l'anàlisi d'expressió diferencial i els contrasts entre els diferents grups.
+
+```{r}
+# Anàlisi d'expressió diferencial
+dds <- DESeq(dds)
+res1 <- results(dds, contrast=c("Group","NIT","ELI"))
+mcols(res1, use.names = TRUE)
+summary(res1)
+table(res1$padj < 0.05)
+res2 <- results(dds, contrast = c("Group","NIT","SFI"))
+mcols(res2, use.names = TRUE)
+summary(res2)
+table(res2$padj < 0.05)
+res3 <- results(dds, contrast = c("Group","ELI","SFI"))
+mcols(res3, use.names = TRUE)
+summary(res3)
+table(res3$padj < 0.05)
+plotCounts(dds, gene=which.min(res1$padj), intgroup="Group")
+```
+
+Amb aquests resultats podem veure que la comparació entre les mostres NIT i ELI són les que tenen més gens significativament diferenciats, tenint en compte un nivell d'alfa de 0.05. Aquests resultats eren d'esperar quan veiem els plot de PCA previ. TAmbé hi ha una diferenciació clara entre els gens dels grups ELI i SFI tot i que les diferencies significatives entre mostres dels grups NIT i SFI són menors.
+
+### 3.4 Anotació dels resultats i exportació
+
+Els resultats de les tres comparacions s'han anotat i desat al fitxer 'ExportedResults.csv'.
+
+```{r}
+library("AnnotationDbi")
+library("org.Hs.eg.db")
+res1$symbol <- mapIds(org.Hs.eg.db,keys=row.names(res1),column="SYMBOL",keytype="ENSEMBL",multiVals="first")
+res1$entrez <- mapIds(org.Hs.eg.db,keys=row.names(res1),column="ENTREZID",keytype="ENSEMBL",multiVals="first")
+resOrdered <- res1[order(res1$pvalue),]
+resOrderedDF <- as.data.frame(resOrdered)
+write.csv(resOrderedDF, file = "ExportedResults1.csv")
+
+res2$symbol <- mapIds(org.Hs.eg.db,keys=row.names(res2),column="SYMBOL",keytype="ENSEMBL",multiVals="first")
+res2$entrez <- mapIds(org.Hs.eg.db,keys=row.names(res2),column="ENTREZID",keytype="ENSEMBL",multiVals="first")
+resOrdered <- res2[order(res2$pvalue),]
+resOrderedDF <- as.data.frame(resOrdered)
+write.csv(resOrderedDF, file = "ExportedResults2.csv")
+
+res3$symbol <- mapIds(org.Hs.eg.db,keys=row.names(res3),column="SYMBOL",keytype="ENSEMBL",multiVals="first")
+res3$entrez <- mapIds(org.Hs.eg.db,keys=row.names(res3),column="ENTREZID",keytype="ENSEMBL",multiVals="first")
+resOrdered <- res3[order(res3$pvalue),]
+resOrderedDF <- as.data.frame(resOrdered)
+write.csv(resOrderedDF, file = "ExportedResults3.csv")
+library("ReportingTools")
+htmlRep <- HTMLReport(shortName="report", title="My report",reportDirectory=".")
+publish(resOrderedDF, htmlRep)
+url <- finish(htmlRep)
+```
+
+## 4.Discussió
+
+
+La principal limitació de l'estudi pot ser que No totes les dades pertanyen al mateix tipus molecular, algunes són `RNA Seq` i d’altres `Allele-Specific Exression`. Caldria tornar a fer l'anàlisi excloent les dades que no siguin `RNA seq`. El fet de que no se sap amb exactitud la procedència de les dades, també és una limitació perquè un major coneixement de les mateixes podria haver ajudat a enfocar l'anàlisi des d'una altre perspectiva.
+Per últim, en aquesta anàlisi no s’ha tingut en compte el sexe dels participants, seria interessant poder fer una altre anàlisi tenint en compte aquest factor.
+
+
+## 5.Referències
+
+[1] - https://hbctraining.github.io/DGE_workshop/lessons/08_DGE_LRT.html
+
+[2] - https://support.bioconductor.org/p/61563/#61564
+
+[3] - http://bioconductor.org/packages/devel/bioc/vignettes/DESeq2/inst/doc/DESeq2.html#independent-filtering-and-multiple-testing
